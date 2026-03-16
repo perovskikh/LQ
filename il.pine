@@ -150,6 +150,8 @@ var array<BreakoutLevel> pendingBreakouts = array.new<BreakoutLevel>()
 var array<box>           vpBoxes          = array.new<box>()
 var array<line>          vpLines          = array.new<line>()
 var array<label>         vpLabels         = array.new<label>()
+var float               stochK           = na
+var float               stochD           = na
 
 // ═══════════════════════════════════════════════════════════════════════
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -343,6 +345,15 @@ if canUpdate
         manageHistory(lowHistory, maxHistory)
 
 // ═══════════════════════════════════════════════════════════════════════
+// STOCHASTIC — расчёт с таймфреймом уровней
+// ═══════════════════════════════════════════════════════════════════════════════
+stoch_tf_used = useHigherTF ? higherTF : stoch_tf
+[stochK, stochD] = request.security(syminfo.tickerid, stoch_tf_used,
+     [ta.stoch(close, high, low, stoch_k), ta.sma(ta.stoch(close, high, low, stoch_k), stoch_d)],
+     lookahead=barmerge.lookahead_off)
+stochK := ta.wma(stochK, stoch_smooth)
+
+ // ═══════════════════════════════════════════════════════════════════════════════
 // VOLUME PROFILE — серийные вычисления ОБЯЗАТЕЛЬНО вне if-блока
 // ═══════════════════════════════════════════════════════════════════════
 int tfSec = timeframe.in_seconds()
@@ -620,7 +631,7 @@ if barstate.islast and vp_enable
 // ═══════════════════════════════════════════════════════════════════════
 // ТАБЛИЦА
 // ═══════════════════════════════════════════════════════════════════════
-var table T = table.new(position.top_right, 2, 6,
+var table T = table.new(position.top_right, 2, 8,
      bgcolor=color.rgb(8,8,18,78), border_color=color.rgb(60,60,70,60), border_width=1)
 
 if barstate.islast
@@ -641,4 +652,12 @@ if barstate.islast
          vp_enable ? vp_mode + " / " + str.tostring(vpLookback) + "б" +
               (vp_pin_right ? " 📌" : "") : "off",
          text_color=vp_enable ? color.new(color.yellow, 0) : color.gray,
+         text_size=size.small)
+    table.cell(T, 0, 6, "Stoch", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 6, str.tostring(stoch_tf_used),
+         text_color=color.white, bgcolor=color.rgb(25,55,110), text_size=size.small)
+    table.cell(T, 0, 7, "K/D", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 7,
+         na(stochK) ? "—" : str.tostring(stochK, "#.0") + " / " + str.tostring(stochD, "#.0"),
+         text_color=stochK > stoch_ob ? color.red : (stochK < stoch_os ? color.green : color.gray),
          text_size=size.small)
