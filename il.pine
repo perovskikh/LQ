@@ -1,0 +1,626 @@
+//@version=6
+// ═══════════════════════════════════════════════════════════════════════════════
+// INDICATOR LINE  —  MS Levels + Volume Profile (VAH / VAL / POC / VA)
+// ═══════════════════════════════════════════════════════════════════════════════
+indicator("IL", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ОСНОВНЫЕ НАСТРОЙКИ
+// ═══════════════════════════════════════════════════════════════════════
+string diffMode  = input.string("Авто", "Режим допуска",
+     options=["Авто","Ручной"], group="Основные настройки")
+allowedDiff      = input.float(1.0, "Допуск в пунктах",
+     minval=1.0, group="Основные настройки", active=diffMode=="Ручной")
+maxHistory       = input.int(200, "Глубина анализа", minval=100, maxval=5000,
+     group="Основные настройки")
+newBarOnly       = input.bool(true, "Обновлять только по новому бару",
+     group="Основные настройки")
+useHigherTF      = input.bool(false, "Использовать старший ТФ для уровней",
+     group="Основные настройки")
+higherTF         = input.timeframe("1D", "Таймфрейм для уровней",
+     group="Основные настройки", active=useHigherTF)
+
+// ═══════════════════════════════════════════════════════════════════════
+// СТОХАСТИК
+// ═══════════════════════════════════════════════════════════════════════
+stoch_enable = input.bool(true,  "Включить Stochastic",                  group="Stochastic")
+stoch_tf     = input.timeframe("1D", "Таймфрейм Stochastic",
+     tooltip="Рекомендуется совпадать с 'Таймфрейм для уровней'",        group="Stochastic")
+stoch_k      = input.int(14, "%K период",   minval=1, maxval=100,        group="Stochastic")
+stoch_d      = input.int(3,  "%D период",   minval=1, maxval=50,         group="Stochastic")
+stoch_smooth = input.int(3,  "Сглаживание", minval=1, maxval=50,         group="Stochastic")
+stoch_ob     = input.float(80.0, "Перекупленность", minval=50, maxval=99,group="Stochastic")
+stoch_os     = input.float(20.0, "Перепроданность", minval=1,  maxval=50,group="Stochastic")
+
+// ═══════════════════════════════════════════════════════════════════════
+// УСЛОВИЯ ПОИСКА
+// ═══════════════════════════════════════════════════════════════════════
+enableHH         = input.bool(true,  "HH (Higher High)", group="Условия поиска")
+enableLL         = input.bool(true,  "LL (Lower Low)",   group="Условия поиска")
+enableHL         = input.bool(true,  "HL (Higher Low)",  group="Условия поиска")
+enableLH         = input.bool(true,  "LH (Lower High)",  group="Условия поиска")
+hlLhBreakoutOnly = input.bool(false, "HL/LH только после пробоя", group="Условия поиска")
+
+// ═══════════════════════════════════════════════════════════════════════
+// СТИЛИ ЛИНИЙ
+// ═══════════════════════════════════════════════════════════════════════
+hhColor = input.color(color.blue,    "Цвет HH", group="Стили линий")
+hhWidth = input.int(1, minval=1, maxval=5, title="Ширина HH", group="Стили линий")
+hhStyle = input.string("solid", "Стиль HH", options=["solid","dashed","dotted"], group="Стили линий")
+hhMode  = input.string("ray",   "Режим HH",  options=["horizontal","segment","ray"], group="Стили линий")
+
+llColor = input.color(color.red,     "Цвет LL", group="Стили линий")
+llWidth = input.int(1, minval=1, maxval=5, title="Ширина LL", group="Стили линий")
+llStyle = input.string("solid", "Стиль LL", options=["solid","dashed","dotted"], group="Стили линий")
+llMode  = input.string("ray",   "Режим LL",  options=["horizontal","segment","ray"], group="Стили линий")
+
+hlColor = input.color(color.green,   "Цвет HL", group="Стили линий")
+hlWidth = input.int(1, minval=1, maxval=5, title="Ширина HL", group="Стили линий")
+hlStyle = input.string("solid", "Стиль HL", options=["solid","dashed","dotted"], group="Стили линий")
+hlMode  = input.string("ray",   "Режим HL",  options=["horizontal","segment","ray"], group="Стили линий")
+
+lhColor = input.color(color.fuchsia, "Цвет LH", group="Стили линий")
+lhWidth = input.int(1, minval=1, maxval=5, title="Ширина LH", group="Стили линий")
+lhStyle = input.string("solid", "Стиль LH", options=["solid","dashed","dotted"], group="Стили линий")
+lhMode  = input.string("ray",   "Режим LH",  options=["horizontal","segment","ray"], group="Стили линий")
+
+maxHH   = input.int(5, "Макс. линий HH", minval=1, maxval=200, group="Лимиты объектов")
+maxLL   = input.int(5, "Макс. линий LL", minval=1, maxval=200, group="Лимиты объектов")
+maxHL   = input.int(3, "Макс. линий HL", minval=1, maxval=100, group="Лимиты объектов")
+maxLH   = input.int(3, "Макс. линий LH", minval=1, maxval=100, group="Лимиты объектов")
+
+// ═══════════════════════════════════════════════════════════════════════
+// НАСТРОЙКИ VOLUME PROFILE
+// ═══════════════════════════════════════════════════════════════════════
+vp_enable       = input.bool(true, "Включить Volume Profile", group="Volume Profile")
+vp_mode         = input.string("Bars", "Режим профиля",
+     options=["Bars","Session","Week","Month"],                          group="Volume Profile")
+vp_lookback     = input.int(100, "Глубина профиля (баров)",
+     minval=10, maxval=500,                                              group="Volume Profile",
+     active=vp_mode=="Month")
+vp_width        = input.int(40,  "Ширина профиля (баров)", minval=5,    group="Volume Profile")
+
+// ── Позиционирование ─────────────────────────────────────────────────
+vp_pin_right    = input.bool(true, "📌 Прижать к правой границе графика", group="Volume Profile")
+vp_right_offset = input.int(50, "Отступ от правого края (баров в будущем)",
+     minval=1, maxval=300,                                               group="Volume Profile",
+     active=vp_pin_right)
+vp_left_offset  = input.int(10, "Отступ влево от текущего бара",
+     minval=0, maxval=100,                                               group="Volume Profile",
+     active=not vp_pin_right)
+
+// ── Прозрачность ─────────────────────────────────────────────────────
+vp_transp       = input.int(80, "Прозрачность профиля %",
+     minval=0, maxval=95,                                                group="Volume Profile")
+
+// ── Цвета ────────────────────────────────────────────────────────────
+vp_color_up     = input.color(color.new(color.green, 50), "Цвет объема (Покупка)",  group="Volume Profile")
+vp_color_down   = input.color(color.new(color.red,   50), "Цвет объема (Продажа)",  group="Volume Profile")
+
+// ── Режим уровней ────────────────────────────────────────────────────
+vp_step_mode    = input.string("Кол-во уровней", "Режим уровней",
+     options=["Кол-во уровней","Размер в тиках"],                       group="Volume Profile")
+vp_rows         = input.int(24,  "Количество уровней", minval=5, maxval=100,
+     group="Volume Profile", active=vp_step_mode=="Кол-во уровней")
+vp_tick_mult    = input.float(10,"Размер уровня (в тиках)", minval=1,
+     group="Volume Profile", active=vp_step_mode=="Размер в тиках")
+
+// ── Value Area ───────────────────────────────────────────────────────
+vp_show_va      = input.bool(true,  "Показывать Value Area",             group="Volume Profile")
+vp_va_pct       = input.float(70.0, "Value Area %", minval=50, maxval=95,group="Volume Profile")
+vp_va_color     = input.color(color.new(color.blue, 88), "Цвет Value Area (фон)", group="Volume Profile")
+
+// ── POC ──────────────────────────────────────────────────────────────
+vp_show_poc     = input.bool(true, "Показывать POC линию",               group="Volume Profile")
+vp_poc_color    = input.color(color.yellow, "Цвет POC",                  group="Volume Profile")
+vp_poc_extend   = input.bool(true, "Тянуть POC/VAH/VAL (ray)",           group="Volume Profile")
+
+// ── VAH / VAL ────────────────────────────────────────────────────────
+vp_show_vah_val = input.bool(true, "Показывать VAH / VAL линии",         group="Volume Profile")
+vp_vah_color    = input.color(color.new(color.teal,   20), "Цвет VAH",  group="Volume Profile")
+vp_val_color    = input.color(color.new(color.orange, 20), "Цвет VAL",  group="Volume Profile")
+
+// ── LVN ──────────────────────────────────────────────────────────────
+vp_show_lvn     = input.bool(false, "Подсвечивать LVN зоны",             group="Volume Profile")
+vp_lvn_color    = input.color(color.new(color.gray, 80), "Цвет LVN",    group="Volume Profile")
+vp_lvn_thresh   = input.float(20.0, "LVN порог (% от макс объёма)",
+     minval=1, maxval=50,                                                group="Volume Profile")
+
+// ═══════════════════════════════════════════════════════════════════════
+// ТИПЫ
+// ═══════════════════════════════════════════════════════════════════════
+enum PatternType
+    HH
+    LL
+    HL
+    LH
+
+type PricePoint
+    float price
+    int   time
+
+type BreakoutLevel
+    float       price
+    PatternType type
+    PricePoint  p1
+    PricePoint  p2
+
+// ═══════════════════════════════════════════════════════════════════════
+// ГЛОБАЛЬНОЕ СОСТОЯНИЕ
+// ═══════════════════════════════════════════════════════════════════════
+var array<PricePoint>    highHistory      = array.new<PricePoint>()
+var array<PricePoint>    lowHistory       = array.new<PricePoint>()
+var array<line>          hhLines          = array.new<line>()
+var array<line>          llLines          = array.new<line>()
+var array<line>          hlLines          = array.new<line>()
+var array<line>          lhLines          = array.new<line>()
+var array<BreakoutLevel> pendingBreakouts = array.new<BreakoutLevel>()
+var array<box>           vpBoxes          = array.new<box>()
+var array<line>          vpLines          = array.new<line>()
+var array<label>         vpLabels         = array.new<label>()
+
+// ═══════════════════════════════════════════════════════════════════════
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ═══════════════════════════════════════════════════════════════════════
+getLineStyle(string s) =>
+    switch s
+        "solid"  => line.style_solid
+        "dashed" => line.style_dashed
+        "dotted" => line.style_dotted
+        =>          line.style_solid
+
+manageLines(array<line> lines, int maxL) =>
+    if lines.size() > maxL
+        line.delete(lines.shift())
+
+manageHistory(array<PricePoint> hist, int maxH) =>
+    if hist.size() > maxH
+        hist.shift()
+
+getSafeMintick() =>
+    float mt = syminfo.mintick
+    if na(mt) or mt <= 0
+        mt := close > 1.0 ? 0.01 : 0.00001
+    mt
+
+drawMatchLine(PatternType pType, PricePoint p1, PricePoint p2) =>
+    color       c   = switch pType
+        PatternType.HH => hhColor
+        PatternType.LL => llColor
+        PatternType.HL => hlColor
+        PatternType.LH => lhColor
+    string      md  = switch pType
+        PatternType.HH => hhMode
+        PatternType.LL => llMode
+        PatternType.HL => hlMode
+        PatternType.LH => lhMode
+    int         w   = switch pType
+        PatternType.HH => hhWidth
+        PatternType.LL => llWidth
+        PatternType.HL => hlWidth
+        PatternType.LH => lhWidth
+    string      st  = switch pType
+        PatternType.HH => hhStyle
+        PatternType.LL => llStyle
+        PatternType.HL => hlStyle
+        PatternType.LH => lhStyle
+    array<line> arr = switch pType
+        PatternType.HH => hhLines
+        PatternType.LL => llLines
+        PatternType.HL => hlLines
+        PatternType.LH => lhLines
+    int         mx  = switch pType
+        PatternType.HH => maxHH
+        PatternType.LL => maxLL
+        PatternType.HL => maxHL
+        PatternType.LH => maxLH
+    extStyle = switch md
+        "horizontal" => extend.both
+        "segment"    => extend.none
+        "ray"        => extend.right
+        =>              extend.none
+    x1 = p1.time
+    x2 = p2.time
+    if md == "ray" or md == "horizontal"
+        x1 := math.min(p1.time, p2.time)
+        x2  := x1 + timeframe.in_seconds() * 1000
+    l = line.new(x1, p1.price, x2, p1.price,
+         xloc.bar_time, extStyle, c, getLineStyle(st), w)
+    arr.push(l)
+    manageLines(arr, mx)
+
+// ═══════════════════════════════════════════════════════════════════════
+// ОСНОВНАЯ ЛОГИКА MS LEVELS
+// ═══════════════════════════════════════════════════════════════════════
+bool canUpdate = not newBarOnly or barstate.isconfirmed
+
+if canUpdate
+    float safeMT  = getSafeMintick()
+    int   steps   = math.max(int(math.round(allowedDiff)), 1)
+    float diffThr = diffMode == "Авто" ? safeMT : math.max(steps * safeMT, safeMT)
+    diffThr      := math.max(diffThr, safeMT)
+    float compThr = diffThr + safeMT * 0.001
+
+    if hlLhBreakoutOnly and pendingBreakouts.size() > 0
+        for i = pendingBreakouts.size() - 1 to 0
+            BreakoutLevel lvl = pendingBreakouts.get(i)
+            bool broken = false
+            bool stale  = false
+            if lvl.type == PatternType.HL and low < lvl.price
+                broken := true
+            else if lvl.type == PatternType.LH and high > lvl.price
+                broken := true
+            if broken
+                drawMatchLine(lvl.type, lvl.p1, lvl.p2)
+                pendingBreakouts.remove(i)
+            else
+                if lvl.type == PatternType.HL and highHistory.size() > 0
+                    stale := lvl.p2.time < highHistory.get(0).time
+                else if lvl.type == PatternType.LH and lowHistory.size() > 0
+                    stale := lvl.p2.time < lowHistory.get(0).time
+                if stale
+                    pendingBreakouts.remove(i)
+
+    if useHigherTF
+        if timeframe.change(higherTF)
+            [htfH, htfL, htfT] = request.security(syminfo.tickerid, higherTF,
+                 [high[1], low[1], time[1]], lookahead=barmerge.lookahead_off)
+            if not na(htfH)
+                PricePoint hp = PricePoint.new(htfH, htfT)
+                PricePoint lp = PricePoint.new(htfL, htfT)
+                if enableHH
+                    for oh in highHistory
+                        if math.abs(hp.price - oh.price) <= compThr
+                            drawMatchLine(PatternType.HH, hp, oh)
+                if enableLH
+                    for ol in lowHistory
+                        if math.abs(hp.price - ol.price) <= compThr
+                            if hlLhBreakoutOnly
+                                pendingBreakouts.push(BreakoutLevel.new(hp.price, PatternType.LH, hp, ol))
+                            else
+                                drawMatchLine(PatternType.LH, hp, ol)
+                if enableHL
+                    for oh in highHistory
+                        if math.abs(lp.price - oh.price) <= compThr
+                            if hlLhBreakoutOnly
+                                pendingBreakouts.push(BreakoutLevel.new(lp.price, PatternType.HL, lp, oh))
+                            else
+                                drawMatchLine(PatternType.HL, lp, oh)
+                if enableLL
+                    for ol in lowHistory
+                        if math.abs(lp.price - ol.price) <= compThr
+                            drawMatchLine(PatternType.LL, lp, ol)
+                highHistory.push(hp)
+                manageHistory(highHistory, maxHistory)
+                lowHistory.push(lp)
+                manageHistory(lowHistory, maxHistory)
+    else
+        PricePoint curH = PricePoint.new(high, time)
+        PricePoint curL = PricePoint.new(low,  time)
+        if enableHH
+            for oh in highHistory
+                if math.abs(curH.price - oh.price) <= compThr
+                    drawMatchLine(PatternType.HH, curH, oh)
+        if enableLH
+            for ol in lowHistory
+                if math.abs(curH.price - ol.price) <= compThr
+                    if hlLhBreakoutOnly
+                        pendingBreakouts.push(BreakoutLevel.new(curH.price, PatternType.LH, curH, ol))
+                    else
+                        drawMatchLine(PatternType.LH, curH, ol)
+        if enableHL
+            for oh in highHistory
+                if math.abs(curL.price - oh.price) <= compThr
+                    if hlLhBreakoutOnly
+                        pendingBreakouts.push(BreakoutLevel.new(curL.price, PatternType.HL, curL, oh))
+                    else
+                        drawMatchLine(PatternType.HL, curL, oh)
+        if enableLL
+            for ol in lowHistory
+                if math.abs(curL.price - ol.price) <= compThr
+                    drawMatchLine(PatternType.LL, curL, ol)
+        highHistory.push(curH)
+        manageHistory(highHistory, maxHistory)
+        lowHistory.push(curL)
+        manageHistory(lowHistory, maxHistory)
+
+// ═══════════════════════════════════════════════════════════════════════
+// VOLUME PROFILE — серийные вычисления ОБЯЗАТЕЛЬНО вне if-блока
+// ═══════════════════════════════════════════════════════════════════════
+int tfSec = timeframe.in_seconds()
+int tfMin = math.max(tfSec / 60, 1)
+
+int vpLookback = switch vp_mode
+    "Session" => math.max(math.round(480   / tfMin), 10)
+    "Week"    => math.max(math.round(10080 / tfMin), 10)
+    "Month"   => math.max(math.round(43200 / tfMin), 10)
+    =>           vp_lookback
+
+vpLookback := math.min(vpLookback, 500)
+
+int vpWidthActual = math.min(vp_width, vpLookback)
+
+float vpHi = ta.highest(high, vpLookback)
+float vpLo = ta.lowest(low,   vpLookback)
+
+// ═══════════════════════════════════════════════════════════════════════
+// VOLUME PROFILE — отрисовка на последнем баре
+// ═══════════════════════════════════════════════════════════════════════
+if barstate.islast and vp_enable
+
+    // Очистка предыдущих объектов
+    for b in vpBoxes
+        box.delete(b)
+    for l in vpLines
+        line.delete(l)
+    for lb in vpLabels
+        label.delete(lb)
+    vpBoxes.clear()
+    vpLines.clear()
+    vpLabels.clear()
+
+    float rangeSize = vpHi - vpLo
+    if na(rangeSize) or rangeSize <= 0
+        rangeSize := syminfo.mintick * 10
+
+    float vpStep = 0.0
+    int   vpRows = 0
+
+    if vp_step_mode == "Размер в тиках"
+        vpStep := syminfo.mintick * vp_tick_mult
+        vpRows := math.max(1, math.min(int(math.ceil(rangeSize / vpStep)), 200))
+        vpStep := rangeSize / vpRows
+    else
+        vpRows := vp_rows
+        vpStep := rangeSize / vpRows
+
+    if vpStep > 0 and vpRows > 0
+
+        array<float> volUpArr   = array.new_float(vpRows, 0.0)
+        array<float> volDownArr = array.new_float(vpRows, 0.0)
+
+        // Накопление объёмов по уровням
+        for i = 0 to vpLookback - 1
+            float bHigh  = high[i]
+            float bLow   = low[i]
+            float bClose = close[i]
+            float bOpen  = open[i]
+            float bVol   = volume[i]
+
+            if na(bHigh) or na(bLow) or na(bVol) or bVol <= 0
+                continue
+
+            bHigh := math.min(bHigh, vpHi)
+            bLow  := math.max(bLow,  vpLo)
+            if bHigh <= bLow
+                bHigh := bLow + vpStep
+
+            int idxTop = math.max(0, math.min(int(math.floor((bHigh - vpLo) / vpStep)), vpRows - 1))
+            int idxBot = math.max(0, math.min(int(math.floor((bLow  - vpLo) / vpStep)), vpRows - 1))
+
+            int   nLevels   = math.max(idxTop - idxBot + 1, 1)
+            float volPerLvl = bVol / nLevels
+            bool  isBull    = bClose >= bOpen
+
+            for k = idxBot to idxTop
+                if isBull
+                    array.set(volUpArr,   k, array.get(volUpArr,   k) + volPerLvl)
+                else
+                    array.set(volDownArr, k, array.get(volDownArr, k) + volPerLvl)
+
+        // Поиск максимума, POC, Value Area
+        float maxVol   = 0.0
+        float totalVol = 0.0
+        for k = 0 to vpRows - 1
+            float tot = array.get(volUpArr, k) + array.get(volDownArr, k)
+            totalVol += tot
+            if tot > maxVol
+                maxVol := tot
+
+        int   pocIdx = 0
+        float pocVol = 0.0
+        for k = 0 to vpRows - 1
+            float tot = array.get(volUpArr, k) + array.get(volDownArr, k)
+            if tot > pocVol
+                pocVol := tot
+                pocIdx := k
+
+        float vaTarget = totalVol * (vp_va_pct / 100.0)
+        float vaVol    = pocVol
+        int   vaTop    = pocIdx
+        int   vaBot    = pocIdx
+
+        while vaVol < vaTarget
+            float addUp   = vaTop < vpRows - 1
+                 ? array.get(volUpArr, vaTop + 1) + array.get(volDownArr, vaTop + 1) : 0.0
+            float addDown = vaBot > 0
+                 ? array.get(volUpArr, vaBot - 1) + array.get(volDownArr, vaBot - 1) : 0.0
+            if addUp <= 0.0 and addDown <= 0.0
+                break
+            if addUp >= addDown and vaTop < vpRows - 1
+                vaTop += 1
+                vaVol += addUp
+            else if vaBot > 0
+                vaBot -= 1
+                vaVol += addDown
+            else if vaTop < vpRows - 1
+                vaTop += 1
+                vaVol += addUp
+            else
+                break
+
+        float vahPrice = vpLo + (vaTop + 1) * vpStep
+        float valPrice = vpLo +  vaBot      * vpStep
+        float pocPrice = vpLo + (pocIdx + 0.5) * vpStep
+
+        // ══════════════════════════════════════════════════════════════
+        // КООРДИНАТЫ И ОРИЕНТАЦИЯ
+        // ══════════════════════════════════════════════════════════════
+        //
+        // 📌 PIN RIGHT — профиль у правой границы (у ценовой шкалы)
+        //   Правый край: last_bar_index + vp_right_offset  (в будущих барах)
+        //   Левый  край: xRight - width                    (уходит в историю)
+        //   Бары растут ВЛЕВО от xRight:
+        //     Buy  → [xRight - wBuy  .. xRight]            правая часть
+        //     Sell → [xRight - wTotal.. xRight - wBuy]     левая часть
+        //   Луч линий → extend.left (уходит в историю)
+        //   Метки     → xLeft - 1, label_right
+        //
+        // 📊 NORMAL — профиль левее текущих свечей
+        //   Правый край: last_bar_index - vp_left_offset   (у текущей свечи)
+        //   Левый  край: xRight - width                    (уходит в историю)
+        //   Бары растут ВПРАВО от xLeft (зеркально, к свечам):
+        //     Sell → [xLeft          .. xLeft + wSell]     левая часть
+        //     Buy  → [xLeft + wSell  .. xLeft + wTotal]    правая часть (к свечам)
+        //   Луч линий → extend.right (уходит вправо к текущей цене)
+        //   Метки     → xRight + 1, label_left
+
+        int xRight = vp_pin_right
+             ? last_bar_index + vp_right_offset
+             : last_bar_index - vp_left_offset
+        int xLeft  = xRight - vpWidthActual
+
+        // ── РИСУЕМ БОКСЫ ─────────────────────────────────────────────
+        if maxVol > 0
+            for k = 0 to vpRows - 1
+                float vUp   = array.get(volUpArr,   k)
+                float vDown = array.get(volDownArr, k)
+                float vTot  = vUp + vDown
+
+                if vTot <= 0
+                    continue
+
+                float lvlBot = vpLo +  k      * vpStep
+                float lvlTop = vpLo + (k + 1) * vpStep
+
+                bool isInVA = k >= vaBot and k <= vaTop
+                bool isPoc  = k == pocIdx
+                bool isLVN  = vTot / maxVol * 100.0 < vp_lvn_thresh
+
+                // Фон Value Area — полная ширина уровня
+                if vp_show_va and isInVA and not isPoc
+                    vpBoxes.push(box.new(xLeft, lvlTop, xRight, lvlBot,
+                         border_color=color(na), bgcolor=color.new(vp_va_color, vp_transp)))
+
+                // LVN подсветка
+                if vp_show_lvn and isLVN and not isPoc
+                    vpBoxes.push(box.new(xLeft, lvlTop, xRight, lvlBot,
+                         border_color=color(na), bgcolor=color.new(vp_lvn_color, vp_transp)))
+
+                int wTotal = int(vTot / maxVol * vpWidthActual)
+                if wTotal < 1
+                    wTotal := 1
+
+                int wSell = vDown > 0 ? int(vDown / vTot * wTotal) : 0
+                int wBuy  = wTotal - wSell
+
+                color rawUp   = isPoc ? vp_poc_color : vp_color_up
+                color rawDown = isPoc ? vp_poc_color : vp_color_down
+                color buyCol  = color.new(rawUp,   vp_transp)
+                color sellCol = color.new(rawDown, vp_transp)
+
+                if vp_pin_right
+                    // ── Бары растут ВЛЕВО от xRight ──────────────────
+                    // Buy  — правая часть (у ценовой шкалы)
+                    // Sell — левая  часть (уходит в историю)
+                    if wBuy > 0
+                        vpBoxes.push(box.new(
+                             xRight - wBuy,   lvlTop,
+                             xRight,          lvlBot,
+                             border_color=color(na), bgcolor=buyCol))
+                    if wSell > 0
+                        vpBoxes.push(box.new(
+                             xRight - wTotal, lvlTop,
+                             xRight - wBuy,   lvlBot,
+                             border_color=color(na), bgcolor=sellCol))
+                else
+                    // ── Бары растут ВПРАВО от xLeft ──────────────────
+                    // Sell — левая  часть (уходит в историю)
+                    // Buy  — правая часть (у текущих свечей) ← зеркально
+                    if wSell > 0
+                        vpBoxes.push(box.new(
+                             xLeft,           lvlTop,
+                             xLeft + wSell,   lvlBot,
+                             border_color=color(na), bgcolor=sellCol))
+                    if wBuy > 0
+                        vpBoxes.push(box.new(
+                             xLeft + wSell,         lvlTop,
+                             xLeft + wSell + wBuy,  lvlBot,
+                             border_color=color(na), bgcolor=buyCol))
+
+        // ── POC линия + метка ─────────────────────────────────────────
+        if vp_show_poc and maxVol > 0
+            vpLines.push(line.new(
+                 xLeft, pocPrice, xRight, pocPrice,
+                 color=color.new(vp_poc_color, vp_transp), width=2, style=line.style_dashed,
+                 extend=vp_poc_extend
+                      ? (vp_pin_right ? extend.left : extend.right)
+                      : extend.none))
+            vpLabels.push(label.new(
+                 vp_pin_right ? xLeft - 1 : xRight + 1,
+                 pocPrice,
+                 "POC " + str.tostring(pocPrice, format.mintick),
+                 color=color.new(vp_poc_color, vp_transp),
+                 textcolor=color.white,
+                 style=vp_pin_right ? label.style_label_right : label.style_label_left,
+                 size=size.small))
+
+        // ── VAH линия + метка ─────────────────────────────────────────
+        if vp_show_vah_val and maxVol > 0
+            vpLines.push(line.new(
+                 xLeft, vahPrice, xRight, vahPrice,
+                 color=color.new(vp_vah_color, vp_transp), width=1, style=line.style_dashed,
+                 extend=vp_poc_extend
+                      ? (vp_pin_right ? extend.left : extend.right)
+                      : extend.none))
+            vpLabels.push(label.new(
+                 vp_pin_right ? xLeft - 1 : xRight + 1,
+                 vahPrice,
+                 "VAH " + str.tostring(vahPrice, format.mintick),
+                 color=color.new(vp_vah_color, vp_transp),
+                 textcolor=color.white,
+                 style=vp_pin_right ? label.style_label_right : label.style_label_left,
+                 size=size.small))
+
+        // ── VAL линия + метка ─────────────────────────────────────────
+        if vp_show_vah_val and maxVol > 0
+            vpLines.push(line.new(
+                 xLeft, valPrice, xRight, valPrice,
+                 color=color.new(vp_val_color, vp_transp), width=1, style=line.style_dashed,
+                 extend=vp_poc_extend
+                      ? (vp_pin_right ? extend.left : extend.right)
+                      : extend.none))
+            vpLabels.push(label.new(
+                 vp_pin_right ? xLeft - 1 : xRight + 1,
+                 valPrice,
+                 "VAL " + str.tostring(valPrice, format.mintick),
+                 color=color.new(vp_val_color, vp_transp),
+                 textcolor=color.white,
+                 style=vp_pin_right ? label.style_label_right : label.style_label_left,
+                 size=size.small))
+
+// ═══════════════════════════════════════════════════════════════════════
+// ТАБЛИЦА
+// ═══════════════════════════════════════════════════════════════════════
+var table T = table.new(position.top_right, 2, 6,
+     bgcolor=color.rgb(8,8,18,78), border_color=color.rgb(60,60,70,60), border_width=1)
+
+if barstate.islast
+    table.cell(T, 0, 0, "MS Levels + VP",
+         text_color=color.white, bgcolor=color.rgb(25,55,110), text_size=size.small)
+    table.cell(T, 1, 0, useHigherTF ? higherTF : timeframe.period,
+         text_color=color.white, bgcolor=color.rgb(25,55,110), text_size=size.small)
+    table.cell(T, 0, 1, "HH", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 1, str.tostring(hhLines.size()), text_color=hhColor, text_size=size.small)
+    table.cell(T, 0, 2, "LL", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 2, str.tostring(llLines.size()), text_color=llColor, text_size=size.small)
+    table.cell(T, 0, 3, "HL", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 3, str.tostring(hlLines.size()), text_color=hlColor, text_size=size.small)
+    table.cell(T, 0, 4, "LH", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 4, str.tostring(lhLines.size()), text_color=lhColor, text_size=size.small)
+    table.cell(T, 0, 5, "VP", text_color=color.gray, text_size=size.small)
+    table.cell(T, 1, 5,
+         vp_enable ? vp_mode + " / " + str.tostring(vpLookback) + "б" +
+              (vp_pin_right ? " 📌" : "") : "off",
+         text_color=vp_enable ? color.new(color.yellow, 0) : color.gray,
+         text_size=size.small)
