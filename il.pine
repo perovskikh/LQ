@@ -20,13 +20,19 @@ useHigherTF      = input.bool(false, "Использовать старший Т
 higherTF         = input.timeframe("1D", "Таймфрейм для уровней",
      group="Основные настройки", active=useHigherTF)
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // СТОХАСТИК
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+stoch_tf     = input.timeframe("1D", "Таймфрейм Stochastic",
+     tooltip="Рекомендуется совпадать с 'Таймфрейм для уровней'", group="Stochastic")
+stoch_k      = input.int(14, "%K период",   minval=1, maxval=100,        group="Stochastic")
+stoch_d      = input.int(3,  "%D период",   minval=1, maxval=50,         group="Stochastic")
+stoch_smooth = input.int(3,  "Сглаживание", minval=1, maxval=50,         group="Stochastic")
+stoch_ob     = input.float(80.0, "Перекупленность", minval=50, maxval=99,group="Stochastic")
+stoch_os     = input.float(20.0, "Перепроданность", minval=1,  maxval=50,group="Stochastic")
 
-// ═══════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // УСЛОВИЯ ПОИСКА
-// ═══════════════════════════════════════════════════════════════════════
 enableHH         = input.bool(true,  "HH (Higher High)", group="Условия поиска")
 enableLL         = input.bool(true,  "LL (Lower Low)",   group="Условия поиска")
 enableHL         = input.bool(true,  "HL (Higher Low)",  group="Условия поиска")
@@ -348,10 +354,11 @@ if canUpdate
 // STOCHASTIC — расчёт с таймфреймом уровней
 // ═══════════════════════════════════════════════════════════════════════════════
 stoch_tf_used = useHigherTF ? higherTF : stoch_tf
-[stochK, stochD] = request.security(syminfo.tickerid, stoch_tf_used,
-     [ta.stoch(close, high, low, stoch_k), ta.sma(ta.stoch(close, high, low, stoch_k), stoch_d)],
+[stochK_raw, stochD_raw] = request.security(syminfo.tickerid, stoch_tf_used,
+     [ta.stoch(close, high, low, stoch_k), ta.stoch(close, high, low, stoch_k)],
      lookahead=barmerge.lookahead_off)
-stochK := ta.wma(stochK, stoch_smooth)
+stochK := na(stochK_raw) ? na : ta.wma(stochK_raw, stoch_smooth)
+stochD := na(stochD_raw) ? na : ta.wma(stochD_raw, stoch_smooth)
 
  // ═══════════════════════════════════════════════════════════════════════════════
 // VOLUME PROFILE — серийные вычисления ОБЯЗАТЕЛЬНО вне if-блока
