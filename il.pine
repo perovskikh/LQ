@@ -1,8 +1,8 @@
 //@version=6
 // ═══════════════════════════════════════════════════════════════════════════════
-// INDICATOR LINE  —  MS Levels + Volume Profile (VAH / VAL / POC / VA)
+// LQ — Liquidity Zones: MS Levels + Volume Profile (VAH / VAL / POC / VA)
 // ═══════════════════════════════════════════════════════════════════════════════
-indicator("IL", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+indicator("LQ", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
 
 // ═══════════════════════════════════════════════════════════════════════
 // ОСНОВНЫЕ НАСТРОЙКИ
@@ -23,14 +23,6 @@ higherTF         = input.timeframe("1D", "Таймфрейм для уровне
 // ═══════════════════════════════════════════════════════════════════════
 // СТОХАСТИК
 // ═══════════════════════════════════════════════════════════════════════
-stoch_enable = input.bool(true,  "Включить Stochastic",                  group="Stochastic")
-stoch_tf     = input.timeframe("1D", "Таймфрейм Stochastic",
-     tooltip="Рекомендуется совпадать с 'Таймфрейм для уровней'",        group="Stochastic")
-stoch_k      = input.int(14, "%K период",   minval=1, maxval=100,        group="Stochastic")
-stoch_d      = input.int(3,  "%D период",   minval=1, maxval=50,         group="Stochastic")
-stoch_smooth = input.int(3,  "Сглаживание", minval=1, maxval=50,         group="Stochastic")
-stoch_ob     = input.float(80.0, "Перекупленность", minval=50, maxval=99,group="Stochastic")
-stoch_os     = input.float(20.0, "Перепроданность", minval=1,  maxval=50,group="Stochastic")
 
 // ═══════════════════════════════════════════════════════════════════════
 // УСЛОВИЯ ПОИСКА
@@ -290,9 +282,22 @@ if canUpdate
                     for ol in lowHistory
                         if math.abs(lp.price - ol.price) <= compThr
                             drawMatchLine(PatternType.LL, lp, ol)
-                highHistory.push(hp)
+                // Защита от дубликатов
+                bool hExists = false
+                bool lExists = false
+                for oh in highHistory
+                    if oh.price == hp.price and oh.time == hp.time
+                        hExists := true
+                        break
+                for ol in lowHistory
+                    if ol.price == lp.price and ol.time == lp.time
+                        lExists := true
+                        break
+                if not hExists
+                    highHistory.push(hp)
+                if not lExists
+                    lowHistory.push(lp)
                 manageHistory(highHistory, maxHistory)
-                lowHistory.push(lp)
                 manageHistory(lowHistory, maxHistory)
     else
         PricePoint curH = PricePoint.new(high, time)
@@ -319,9 +324,22 @@ if canUpdate
             for ol in lowHistory
                 if math.abs(curL.price - ol.price) <= compThr
                     drawMatchLine(PatternType.LL, curL, ol)
-        highHistory.push(curH)
+        // Защита от дубликатов
+        bool hExists = false
+        bool lExists = false
+        for oh in highHistory
+            if oh.price == curH.price and oh.time == curH.time
+                hExists := true
+                break
+        for ol in lowHistory
+            if ol.price == curL.price and ol.time == curL.time
+                lExists := true
+                break
+        if not hExists
+            highHistory.push(curH)
+        if not lExists
+            lowHistory.push(curL)
         manageHistory(highHistory, maxHistory)
-        lowHistory.push(curL)
         manageHistory(lowHistory, maxHistory)
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -380,7 +398,7 @@ if barstate.islast and vp_enable
         array<float> volDownArr = array.new_float(vpRows, 0.0)
 
         // Накопление объёмов по уровням
-        for i = 0 to vpLookback - 1
+        for i = 1 to vpLookback - 1
             float bHigh  = high[i]
             float bLow   = low[i]
             float bClose = close[i]
@@ -606,7 +624,7 @@ var table T = table.new(position.top_right, 2, 6,
      bgcolor=color.rgb(8,8,18,78), border_color=color.rgb(60,60,70,60), border_width=1)
 
 if barstate.islast
-    table.cell(T, 0, 0, "MS Levels + VP",
+    table.cell(T, 0, 0, "LQ",
          text_color=color.white, bgcolor=color.rgb(25,55,110), text_size=size.small)
     table.cell(T, 1, 0, useHigherTF ? higherTF : timeframe.period,
          text_color=color.white, bgcolor=color.rgb(25,55,110), text_size=size.small)
